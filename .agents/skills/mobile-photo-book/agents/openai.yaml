@@ -1,0 +1,8 @@
+interface:
+  display_name: "移动照片书"
+  short_description: "创建本机保存的移动端翻页照片书"
+  brand_color: "#00AFCB"
+  default_prompt: "Use $mobile-photo-book to create or refine a local-only mobile photo-book website."
+
+policy:
+  allow_implicit_invocation: true
