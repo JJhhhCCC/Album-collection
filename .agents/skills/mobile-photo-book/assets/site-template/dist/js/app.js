@@ -310,6 +310,7 @@ function renderLibrary() {
     const item = document.createElement("article");
     item.className = `book-item ${isCover ? "book-item--cover" : "book-item--spine"}`;
     item.dataset.bookId = book.id;
+    item.dataset.color = book.colorKey || "cobalt";
     item.draggable = state.managing;
     item.addEventListener("dragstart", () => {
       if (!state.managing) return;
@@ -599,6 +600,7 @@ async function initialize() {
   try {
     state.db = await PhotoBookDB.connect();
     const cleared = await state.db.cleanupIncompleteBooks();
+    await state.db.backfillBookColors();
     await refreshLibrary();
     await warnOnStorage();
     if (cleared) setStatus("已清理一次未完成的导入，请重新添加那组图片。 ");

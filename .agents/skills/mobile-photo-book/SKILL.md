@@ -17,7 +17,7 @@ Create the requested experience as a static, mobile-first website. Its photos mu
 
 - A person creates one image group per book, can preview and order groups and pages, then generates the library in one action.
 - Display names are derived from stored order (`book1`, `book2`, …), so a reorder or deletion always renumbers the library without gaps.
-- Keep the home screen as cyan line-art stacked book spines. Open books in a single-page reader with tap, swipe, keyboard, and reduced-motion fallbacks.
+- Keep the home screen as a near-black, white-line stacked shelf: compact colored spines lead to a larger colored final cover, each with its `bookN` title centered. Open books in a single-page reader with tap, swipe, keyboard, and reduced-motion fallbacks.
 - Treat storage failures and unsupported image decoding as recoverable: explain the affected file or group, preserve usable staging content, and never silently discard a completed book.
 - Do not expose image-upload or deletion actions through WebMCP. Read/navigation tools may only act on the same visible local state.
 

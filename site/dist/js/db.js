@@ -1,5 +1,18 @@
 const DATABASE_NAME = "mobile-photo-book";
 const DATABASE_VERSION = 1;
+const BOOK_COLOR_KEYS = ["coral", "ochre", "leaf", "teal", "cobalt", "violet", "berry", "plum", "clay", "slate"];
+
+function hasBookColorKey(value) {
+  return BOOK_COLOR_KEYS.includes(value);
+}
+
+function chooseBookColorKey(books) {
+  const usage = new Map(BOOK_COLOR_KEYS.map((key) => [key, 0]));
+  books.forEach((book) => {
+    if (hasBookColorKey(book.colorKey)) usage.set(book.colorKey, usage.get(book.colorKey) + 1);
+  });
+  return BOOK_COLOR_KEYS.reduce((choice, key) => usage.get(key) < usage.get(choice) ? key : choice, BOOK_COLOR_KEYS[0]);
+}
 
 function id() {
   return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -73,6 +86,9 @@ export class PhotoBookDB {
   }
 
   async createImportingBook(order) {
+    const tx = this.db.transaction("books", "readwrite");
+    const store = tx.objectStore("books");
+    const existingBooks = await openRequest(store.getAll());
     const book = {
       id: id(),
       order,
@@ -81,11 +97,28 @@ export class PhotoBookDB {
       pageCount: 0,
       lastReadPage: 0,
       status: "importing",
+      colorKey: chooseBookColorKey(existingBooks),
     };
-    const tx = this.db.transaction("books", "readwrite");
-    tx.objectStore("books").add(book);
+    store.add(book);
     await transactionDone(tx);
     return book;
+  }
+
+  async backfillBookColors() {
+    const tx = this.db.transaction("books", "readwrite");
+    const store = tx.objectStore("books");
+    const books = (await openRequest(store.getAll()))
+      .filter((book) => book.status === "ready")
+      .sort((a, b) => a.order - b.order);
+    let changed = 0;
+    books.forEach((book) => {
+      if (hasBookColorKey(book.colorKey)) return;
+      book.colorKey = chooseBookColorKey(books);
+      store.put(book);
+      changed += 1;
+    });
+    await transactionDone(tx);
+    return changed;
   }
 
   async addPage({ bookId, order, blob, width, height, mime, originalName }) {
