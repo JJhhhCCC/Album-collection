@@ -1,5 +1,7 @@
-const MAX_EDGE = 2560;
-const QUALITY = 0.86;
+const PAGE_MAX_EDGE = 2560;
+const PAGE_QUALITY = 0.86;
+const COVER_MAX_EDGE = 1600;
+const COVER_QUALITY = 0.84;
 
 function waitForImage(image) {
   if (image.decode) return image.decode();
@@ -15,7 +17,7 @@ function canvasBlob(canvas, mime, quality) {
   });
 }
 
-export async function optimizeImage(file) {
+async function optimize(file, { maxEdge, quality }) {
   if (!file || file.size === 0) throw new Error("文件为空");
   const objectUrl = URL.createObjectURL(file);
   const image = new Image();
@@ -26,7 +28,7 @@ export async function optimizeImage(file) {
     const sourceWidth = image.naturalWidth;
     const sourceHeight = image.naturalHeight;
     if (!sourceWidth || !sourceHeight) throw new Error("图片没有有效尺寸");
-    const scale = Math.min(1, MAX_EDGE / Math.max(sourceWidth, sourceHeight));
+    const scale = Math.min(1, maxEdge / Math.max(sourceWidth, sourceHeight));
     const width = Math.max(1, Math.round(sourceWidth * scale));
     const height = Math.max(1, Math.round(sourceHeight * scale));
     const canvas = document.createElement("canvas");
@@ -38,8 +40,8 @@ export async function optimizeImage(file) {
     context.fillRect(0, 0, width, height);
     context.drawImage(image, 0, 0, width, height);
 
-    let blob = await canvasBlob(canvas, "image/webp", QUALITY);
-    if (blob.type !== "image/webp") blob = await canvasBlob(canvas, "image/jpeg", QUALITY);
+    let blob = await canvasBlob(canvas, "image/webp", quality);
+    if (blob.type !== "image/webp") blob = await canvasBlob(canvas, "image/jpeg", quality);
     return {
       blob,
       width,
@@ -52,4 +54,12 @@ export async function optimizeImage(file) {
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
+}
+
+export function optimizeImage(file) {
+  return optimize(file, { maxEdge: PAGE_MAX_EDGE, quality: PAGE_QUALITY });
+}
+
+export function optimizeCover(file) {
+  return optimize(file, { maxEdge: COVER_MAX_EDGE, quality: COVER_QUALITY });
 }

@@ -41,12 +41,34 @@
             <div class="composer__footer"><button class="secondary-action" id="addGroupButton" type="button">+ 添加一本书</button><button class="primary-action" id="generateButton" type="button" disabled>生成书本</button></div>
           </div>
         </section>
+        <section class="book-settings" id="bookSettings" aria-labelledby="bookSettingsTitle" aria-modal="true" role="dialog" hidden>
+          <form class="book-settings__sheet" id="bookSettingsForm">
+            <header class="composer__header">
+              <button class="icon-button" id="closeBookSettingsButton" type="button" aria-label="关闭书本设置">×</button>
+              <div><p class="eyebrow">整理书架</p><h2 id="bookSettingsTitle">书本设置</h2></div>
+              <span class="composer__count" id="bookSettingsDefaultName"></span>
+            </header>
+            <div class="book-settings__body">
+              <label class="field-label" for="bookSettingsName">书名（选填）</label>
+              <input class="text-input" id="bookSettingsName" type="text" maxlength="30" autocomplete="off" />
+              <p class="field-help">清空后会恢复为当前顺序对应的默认名称。</p>
+              <span class="field-label">封面照片（选填）</span>
+              <div class="cover-picker cover-picker--settings" id="bookSettingsCoverPreview" aria-live="polite"></div>
+              <div class="cover-picker__actions">
+                <button class="secondary-action" id="chooseBookSettingsCoverButton" type="button">选择或更换封面</button>
+                <button class="secondary-action secondary-action--danger" id="removeBookSettingsCoverButton" type="button">移除封面</button>
+              </div>
+            </div>
+            <footer class="book-settings__footer"><button class="primary-action" id="saveBookSettingsButton" type="submit">保存设置</button></footer>
+          </form>
+        </section>
         <section class="reader" id="reader" aria-label="照片阅读器" aria-hidden="true" hidden>
           <header class="reader__header"><button class="icon-button icon-button--back" id="closeReaderButton" type="button" aria-label="返回书架">←</button><div class="reader__title"><strong id="readerBookTitle">book1</strong><span id="readerPageLabel">1 / 1</span></div><button class="icon-button" id="resetZoomButton" type="button" aria-label="重置缩放" hidden>◎</button></header>
           <div class="reader__stage" id="readerStage"><button class="reader__tap-zone reader__tap-zone--previous" id="previousPageButton" type="button" aria-label="上一页"></button><figure class="reader-paper" id="readerPaper"><div class="reader-paper__image-wrap" id="readerImageWrap"><img id="readerImage" alt="" draggable="false" /></div><figcaption id="readerCaption"></figcaption></figure><button class="reader__tap-zone reader__tap-zone--next" id="nextPageButton" type="button" aria-label="下一页"></button></div>
           <p class="reader__tip" id="readerTip">左右滑动翻页 · 双指缩放照片</p>
         </section>
         <input id="fileInput" type="file" accept="image/*,.heic,.heif" multiple hidden />
+        <input id="coverInput" type="file" accept="image/*,.heic,.heif" hidden />
       </main>
     </div>
     <script type="module" src="./js/app.js"></script>

@@ -16,8 +16,10 @@ Create the requested experience as a static, mobile-first website. Its photos mu
 ## Preserve the product behavior
 
 - A person creates one image group per book, can preview and order groups and pages, then generates the library in one action.
-- Display names are derived from stored order (`book1`, `book2`, …), so a reorder or deletion always renumbers the library without gaps.
-- Keep the home screen as a near-black, white-line stacked shelf: compact colored spines lead to a larger colored final cover, each with its `bookN` title centered. Open books in a single-page reader with tap, swipe, keyboard, and reduced-motion fallbacks.
+- Let each staged book optionally store a trimmed custom title (maximum 30 characters) and a separate cover photo. Blank titles remain dynamic (`book1`, `book2`, …), so reorder and deletion renumber only unnamed books; custom titles stay with their books.
+- Keep the home screen as a near-black, white-line stacked shelf: compact spines lead to a larger final cover. Use the persistent book color when no photo cover exists; otherwise center-crop the separate cover photo beneath a dark overlay. Keep the final display title geometrically centered and the page count on the right.
+- A cover is not a reader page. Existing books must be editable in manage mode so people can rename or reset the title and add, replace, or remove the cover without affecting pages or reading progress.
+- Open books in a single-page reader with tap, swipe, keyboard, and reduced-motion fallbacks.
 - Treat storage failures and unsupported image decoding as recoverable: explain the affected file or group, preserve usable staging content, and never silently discard a completed book.
 - Do not expose image-upload or deletion actions through WebMCP. Read/navigation tools may only act on the same visible local state.
 
@@ -25,4 +27,4 @@ Create the requested experience as a static, mobile-first website. Its photos mu
 
 - Run the skill validator after modifying this skill.
 - Scaffold into a temporary empty directory and confirm the result has the static entrypoint and no unresolved template markers.
-- Before publishing an instance, check mobile-width layout, local persistence after reload, book/page ordering, deletion, and reader boundaries.
+- Before publishing an instance, check mobile-width layout, local persistence after reload, dynamic/default titles, custom titles, cover replacement/removal, book/page ordering, deletion, and reader boundaries.

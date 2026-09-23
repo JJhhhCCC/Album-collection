@@ -1,22 +1,16 @@
 const DATABASE_NAME = "mobile-photo-book";
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const BOOK_COLOR_KEYS = ["coral", "ochre", "leaf", "teal", "cobalt", "violet", "berry", "plum", "clay", "slate"];
 
-function hasBookColorKey(value) {
-  return BOOK_COLOR_KEYS.includes(value);
-}
+function hasBookColorKey(value) { return BOOK_COLOR_KEYS.includes(value); }
 
 function chooseBookColorKey(books) {
   const usage = new Map(BOOK_COLOR_KEYS.map((key) => [key, 0]));
-  books.forEach((book) => {
-    if (hasBookColorKey(book.colorKey)) usage.set(book.colorKey, usage.get(book.colorKey) + 1);
-  });
+  books.forEach((book) => { if (hasBookColorKey(book.colorKey)) usage.set(book.colorKey, usage.get(book.colorKey) + 1); });
   return BOOK_COLOR_KEYS.reduce((choice, key) => usage.get(key) < usage.get(choice) ? key : choice, BOOK_COLOR_KEYS[0]);
 }
 
-function id() {
-  return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
+function id() { return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 
 function openRequest(request) {
   return new Promise((resolve, reject) => {
@@ -63,6 +57,7 @@ export class PhotoBookDB {
         pages.createIndex("byBook", "bookId", { unique: false });
         pages.createIndex("byBookOrder", ["bookId", "order"], { unique: true });
       }
+      if (!db.objectStoreNames.contains("covers")) db.createObjectStore("covers", { keyPath: "bookId" });
     };
     return new PhotoBookDB(await openRequest(request));
   }
@@ -73,9 +68,7 @@ export class PhotoBookDB {
     const tx = this.db.transaction("books", "readonly");
     const rows = await openRequest(tx.objectStore("books").getAll());
     await transactionDone(tx);
-    return rows
-      .filter((book) => !readyOnly || book.status === "ready")
-      .sort((a, b) => a.order - b.order);
+    return rows.filter((book) => !readyOnly || book.status === "ready").sort((a, b) => a.order - b.order);
   }
 
   async getBook(bookId) {
@@ -85,19 +78,14 @@ export class PhotoBookDB {
     return row;
   }
 
-  async createImportingBook(order) {
+  async createImportingBook(order, customTitle = null) {
     const tx = this.db.transaction("books", "readwrite");
     const store = tx.objectStore("books");
     const existingBooks = await openRequest(store.getAll());
     const book = {
-      id: id(),
-      order,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      pageCount: 0,
-      lastReadPage: 0,
-      status: "importing",
-      colorKey: chooseBookColorKey(existingBooks),
+      id: id(), order, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      pageCount: 0, lastReadPage: 0, status: "importing", colorKey: chooseBookColorKey(existingBooks),
+      customTitle: customTitle || null, hasCover: false,
     };
     store.add(book);
     await transactionDone(tx);
@@ -107,9 +95,7 @@ export class PhotoBookDB {
   async backfillBookColors() {
     const tx = this.db.transaction("books", "readwrite");
     const store = tx.objectStore("books");
-    const books = (await openRequest(store.getAll()))
-      .filter((book) => book.status === "ready")
-      .sort((a, b) => a.order - b.order);
+    const books = (await openRequest(store.getAll())).filter((book) => book.status === "ready").sort((a, b) => a.order - b.order);
     let changed = 0;
     books.forEach((book) => {
       if (hasBookColorKey(book.colorKey)) return;
@@ -129,14 +115,60 @@ export class PhotoBookDB {
     return page;
   }
 
+  async setCover(bookId, { blob, width, height, mime, originalName }) {
+    const tx = this.db.transaction(["books", "covers"], "readwrite");
+    const books = tx.objectStore("books");
+    const book = await openRequest(books.get(bookId));
+    if (!book) { tx.abort(); throw new Error("找不到这本书"); }
+    tx.objectStore("covers").put({ bookId, blob, width, height, mime, originalName, updatedAt: new Date().toISOString() });
+    book.hasCover = true;
+    book.updatedAt = new Date().toISOString();
+    books.put(book);
+    await transactionDone(tx);
+  }
+
+  async getCover(bookId) {
+    const tx = this.db.transaction("covers", "readonly");
+    const row = await openRequest(tx.objectStore("covers").get(bookId));
+    await transactionDone(tx);
+    return row;
+  }
+
+  async getCovers(bookIds) {
+    if (!bookIds.length) return new Map();
+    const wanted = new Set(bookIds);
+    const tx = this.db.transaction("covers", "readonly");
+    const rows = await openRequest(tx.objectStore("covers").getAll());
+    await transactionDone(tx);
+    return new Map(rows.filter((row) => wanted.has(row.bookId)).map((row) => [row.bookId, row]));
+  }
+
+  async updateBookSettings(bookId, { customTitle = null, coverAction = { type: "unchanged" } }) {
+    const tx = this.db.transaction(["books", "covers"], "readwrite");
+    const books = tx.objectStore("books");
+    const covers = tx.objectStore("covers");
+    const book = await openRequest(books.get(bookId));
+    if (!book) { tx.abort(); throw new Error("找不到这本书"); }
+    book.customTitle = customTitle || null;
+    if (coverAction.type === "remove") {
+      covers.delete(bookId);
+      book.hasCover = false;
+    } else if (coverAction.type === "replace") {
+      const { blob, width, height, mime, originalName } = coverAction.cover;
+      covers.put({ bookId, blob, width, height, mime, originalName, updatedAt: new Date().toISOString() });
+      book.hasCover = true;
+    }
+    book.updatedAt = new Date().toISOString();
+    books.put(book);
+    await transactionDone(tx);
+    return book;
+  }
+
   async completeBook(bookId, pageCount) {
     const tx = this.db.transaction("books", "readwrite");
     const store = tx.objectStore("books");
     const book = await openRequest(store.get(bookId));
-    if (!book) {
-      tx.abort();
-      throw new Error("找不到待完成的书本");
-    }
+    if (!book) { tx.abort(); throw new Error("找不到待完成的书本"); }
     book.status = "ready";
     book.pageCount = pageCount;
     book.updatedAt = new Date().toISOString();
@@ -153,23 +185,24 @@ export class PhotoBookDB {
   }
 
   async deleteBook(bookId) {
-    const tx = this.db.transaction(["books", "pages"], "readwrite");
-    const pages = tx.objectStore("pages").index("byBook");
-    const request = pages.openCursor(IDBKeyRange.only(bookId));
+    const tx = this.db.transaction(["books", "pages", "covers"], "readwrite");
+    const request = tx.objectStore("pages").index("byBook").openCursor(IDBKeyRange.only(bookId));
     request.onsuccess = () => {
       const cursor = request.result;
       if (!cursor) return;
       cursor.delete();
       cursor.continue();
     };
+    tx.objectStore("covers").delete(bookId);
     tx.objectStore("books").delete(bookId);
     await transactionDone(tx);
   }
 
   async deleteAll() {
-    const tx = this.db.transaction(["books", "pages"], "readwrite");
+    const tx = this.db.transaction(["books", "pages", "covers"], "readwrite");
     tx.objectStore("books").clear();
     tx.objectStore("pages").clear();
+    tx.objectStore("covers").clear();
     await transactionDone(tx);
   }
 

@@ -1,5 +1,5 @@
 import { PhotoBookDB } from "./db.js";
-import { optimizeImage } from "./image.js";
+import { optimizeCover, optimizeImage } from "./image.js";
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -8,6 +8,10 @@ const ui = {
   libraryActions: $("libraryActions"), clearAll: $("clearAllButton"), status: $("statusMessage"),
   composer: $("composer"), closeComposer: $("closeComposerButton"), addGroup: $("addGroupButton"),
   generate: $("generateButton"), groups: $("stagingGroups"), groupCount: $("groupCount"), fileInput: $("fileInput"),
+  coverInput: $("coverInput"), settings: $("bookSettings"), settingsForm: $("bookSettingsForm"),
+  closeSettings: $("closeBookSettingsButton"), settingsName: $("bookSettingsName"), settingsDefaultName: $("bookSettingsDefaultName"),
+  settingsCoverPreview: $("bookSettingsCoverPreview"), chooseSettingsCover: $("chooseBookSettingsCoverButton"),
+  removeSettingsCover: $("removeBookSettingsCoverButton"), saveSettings: $("saveBookSettingsButton"),
   reader: $("reader"), readerBook: $("readerBookTitle"), readerPage: $("readerPageLabel"),
   readerImage: $("readerImage"), readerImageWrap: $("readerImageWrap"), readerPaper: $("readerPaper"),
   readerCaption: $("readerCaption"), readerStage: $("readerStage"), readerTip: $("readerTip"),
@@ -22,6 +26,10 @@ const state = {
   importing: false,
   reader: null,
   readerUrl: null,
+  covers: new Map(),
+  coverUrls: new Map(),
+  coverTarget: null,
+  settings: null,
   drag: null,
   gesture: { points: new Map(), start: null, scaleAtStart: 1, pinchDistance: 0, lastTap: 0 },
   zoom: { scale: 1, x: 0, y: 0 },
@@ -46,9 +54,19 @@ function setStatus(message = "") {
   ui.status.textContent = message;
 }
 
+function normalizeTitle(value) {
+  const title = String(value || "").trim();
+  return title ? title.slice(0, 30) : null;
+}
+
+function displayTitle(book, index) {
+  return normalizeTitle(book?.customTitle) || `book${index + 1}`;
+}
+
 function titleFor(bookId) {
   const position = state.books.findIndex((book) => book.id === bookId);
-  return `book${position + 1}`;
+  const book = state.books[position];
+  return displayTitle(book, Math.max(0, position));
 }
 
 function move(items, from, to) {
@@ -73,6 +91,11 @@ function disposeEntry(entry) {
   if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
 }
 
+function disposeGroup(group) {
+  group.files.forEach(disposeEntry);
+  if (group.cover?.previewUrl) URL.revokeObjectURL(group.cover.previewUrl);
+}
+
 function isImageCandidate(file) {
   return file.type.startsWith("image/") || /\.(heic|heif)$/i.test(file.name || "");
 }
@@ -86,6 +109,8 @@ function addGroupFromFiles(files) {
   const group = {
     id: uid(),
     error: "",
+    customTitle: null,
+    cover: null,
     files: accepted.map((file) => ({ id: uid(), file, previewUrl: URL.createObjectURL(file), error: "" })),
   };
   state.groups.push(group);
@@ -96,8 +121,21 @@ function addGroupFromFiles(files) {
 function removeGroup(groupId) {
   const index = state.groups.findIndex((group) => group.id === groupId);
   if (index < 0) return;
-  state.groups[index].files.forEach(disposeEntry);
+  disposeGroup(state.groups[index]);
   state.groups.splice(index, 1);
+  renderGroups();
+}
+
+function chooseGroupCover(groupId) {
+  state.coverTarget = { type: "group", groupId };
+  ui.coverInput.click();
+}
+
+function setGroupCover(groupId, file) {
+  const group = state.groups.find((entry) => entry.id === groupId);
+  if (!group) return;
+  if (group.cover?.previewUrl) URL.revokeObjectURL(group.cover.previewUrl);
+  group.cover = file ? { file, previewUrl: URL.createObjectURL(file), error: "" } : null;
   renderGroups();
 }
 
@@ -153,7 +191,8 @@ function renderGroups() {
     const card = document.createElement("article");
     card.className = "staging-group";
     card.draggable = !state.importing;
-    card.addEventListener("dragstart", () => {
+    card.addEventListener("dragstart", (event) => {
+      if (event.target.closest("input, button")) { event.preventDefault(); return; }
       state.drag = { type: "group", id: group.id };
       card.classList.add("is-dragging");
     });
@@ -171,7 +210,7 @@ function renderGroups() {
     const label = document.createElement("div");
     const strong = document.createElement("div");
     strong.className = "staging-group__label";
-    strong.textContent = `book${groupIndex + 1}`;
+    strong.textContent = normalizeTitle(group.customTitle) || `book${groupIndex + 1}`;
     const meta = document.createElement("div");
     meta.className = "staging-group__meta";
     meta.textContent = group.error || `${group.files.length} 张照片`;
@@ -182,6 +221,52 @@ function renderGroups() {
       upDisabled: groupIndex === 0, downDisabled: groupIndex === state.groups.length - 1, deleteLabel: "删除这组图片",
     }));
     card.append(header);
+
+    const options = document.createElement("div");
+    options.className = "staging-group__options";
+    const nameLabel = document.createElement("label");
+    nameLabel.className = "field-label";
+    nameLabel.textContent = "书名（选填）";
+    const nameInput = document.createElement("input");
+    nameInput.className = "text-input";
+    nameInput.type = "text";
+    nameInput.maxLength = 30;
+    nameInput.value = group.customTitle || "";
+    nameInput.placeholder = `默认：book${groupIndex + 1}`;
+    nameInput.disabled = state.importing;
+    nameInput.setAttribute("aria-label", `第 ${groupIndex + 1} 本书的名称`);
+    nameInput.addEventListener("input", () => {
+      group.customTitle = nameInput.value;
+      strong.textContent = normalizeTitle(group.customTitle) || `book${groupIndex + 1}`;
+    });
+    nameLabel.append(nameInput);
+
+    const cover = document.createElement("div");
+    cover.className = "cover-picker";
+    if (group.cover) {
+      const image = document.createElement("img");
+      image.src = group.cover.previewUrl;
+      image.alt = "所选封面预览";
+      cover.append(image);
+    } else {
+      const emptyCover = document.createElement("span");
+      emptyCover.textContent = "未选择封面，将使用纯色封面";
+      cover.append(emptyCover);
+    }
+    if (group.cover?.error) {
+      const coverError = document.createElement("small");
+      coverError.className = "photo-row__error";
+      coverError.textContent = group.cover.error;
+      cover.append(coverError);
+    }
+    const coverActions = document.createElement("div");
+    coverActions.className = "cover-picker__actions";
+    coverActions.append(
+      button(group.cover ? "更换封面" : "选择封面", () => chooseGroupCover(group.id), { className: "secondary-action", disabled: state.importing }),
+      button("移除封面", () => setGroupCover(group.id, null), { className: "secondary-action secondary-action--danger", disabled: state.importing || !group.cover }),
+    );
+    options.append(nameLabel, cover, coverActions);
+    card.append(options);
 
     const list = document.createElement("ol");
     list.className = "photo-list";
@@ -250,10 +335,21 @@ async function importGroups() {
 
   for (const group of state.groups) {
     group.error = "";
+    if (group.cover) group.cover.error = "";
     group.files.forEach((file) => { file.error = ""; });
     let transientBook;
     try {
-      transientBook = await state.db.createImportingBook(startingOrder + imported);
+      transientBook = await state.db.createImportingBook(startingOrder + imported, normalizeTitle(group.customTitle));
+      if (group.cover) {
+        ui.generate.textContent = `正在处理第 ${imported + 1} 本 · 封面`;
+        try {
+          const cover = await optimizeCover(group.cover.file);
+          await state.db.setCover(transientBook.id, cover);
+        } catch (error) {
+          group.cover.error = error.message || "封面无法读取。";
+          throw error;
+        }
+      }
       for (let index = 0; index < group.files.length; index += 1) {
         const entry = group.files[index];
         ui.generate.textContent = `正在处理第 ${imported + 1} 本 · ${index + 1}/${group.files.length}`;
@@ -279,7 +375,7 @@ async function importGroups() {
 
   state.groups = state.groups.filter((group) => {
     if (!successful.has(group.id)) return true;
-    group.files.forEach(disposeEntry);
+    disposeGroup(group);
     return false;
   });
   await refreshLibrary();
@@ -306,11 +402,21 @@ function renderLibrary() {
   if (!hasBooks) return;
 
   state.books.forEach((book, index) => {
+    const name = displayTitle(book, index);
     const isCover = index === state.books.length - 1;
     const item = document.createElement("article");
     item.className = `book-item ${isCover ? "book-item--cover" : "book-item--spine"}`;
     item.dataset.bookId = book.id;
     item.dataset.color = book.colorKey || "cobalt";
+    const coverUrl = state.coverUrls.get(book.id);
+    if (coverUrl) {
+      item.classList.add("book-item--photo-cover");
+      const coverImage = document.createElement("img");
+      coverImage.className = "book-cover-media";
+      coverImage.src = coverUrl;
+      coverImage.alt = "";
+      item.append(coverImage);
+    }
     item.draggable = state.managing;
     item.addEventListener("dragstart", () => {
       if (!state.managing) return;
@@ -327,11 +433,11 @@ function renderLibrary() {
       await state.db.setBookOrder(state.books.map((entry) => entry.id));
       await refreshLibrary();
     });
-    const open = button("", () => openBook(book.id));
+    const open = button("", () => openBook(book.id), { ariaLabel: `打开 ${name}` });
     open.className = "book-open";
     const title = document.createElement("span");
     title.className = "book-open__title";
-    title.textContent = `book${index + 1}`;
+    title.textContent = name;
     const count = document.createElement("span");
     count.className = "book-open__count";
     count.textContent = `${book.pageCount} 页`;
@@ -341,9 +447,10 @@ function renderLibrary() {
       const tools = document.createElement("div");
       tools.className = "book-tools";
       tools.append(
-        button("↑", () => reorderBook(index, -1), { ariaLabel: `上移 book${index + 1}`, disabled: index === 0 }),
-        button("↓", () => reorderBook(index, 1), { ariaLabel: `下移 book${index + 1}`, disabled: index === state.books.length - 1 }),
-        button("×", () => deleteBook(book.id), { className: "danger", ariaLabel: `删除 book${index + 1}` }),
+        button("设", () => openBookSettings(book.id), { ariaLabel: `设置 ${name}` }),
+        button("↑", () => reorderBook(index, -1), { ariaLabel: `上移 ${name}`, disabled: index === 0 }),
+        button("↓", () => reorderBook(index, 1), { ariaLabel: `下移 ${name}`, disabled: index === state.books.length - 1 }),
+        button("×", () => deleteBook(book.id), { className: "danger", ariaLabel: `删除 ${name}` }),
       );
       item.append(tools);
     }
@@ -353,7 +460,97 @@ function renderLibrary() {
 
 async function refreshLibrary() {
   state.books = await state.db.listBooks();
+  state.coverUrls.forEach((url) => URL.revokeObjectURL(url));
+  state.coverUrls.clear();
+  state.covers = await state.db.getCovers(state.books.map((book) => book.id));
+  state.covers.forEach((cover, bookId) => state.coverUrls.set(bookId, URL.createObjectURL(cover.blob)));
   renderLibrary();
+}
+
+function renderBookSettingsCover() {
+  ui.settingsCoverPreview.replaceChildren();
+  if (!state.settings) return;
+  const existingUrl = state.settings.removeCover ? null : state.coverUrls.get(state.settings.bookId);
+  const previewUrl = state.settings.previewUrl || existingUrl;
+  if (previewUrl) {
+    const image = document.createElement("img");
+    image.src = previewUrl;
+    image.alt = "书本封面预览";
+    ui.settingsCoverPreview.append(image);
+  } else {
+    const empty = document.createElement("span");
+    empty.textContent = "当前使用纯色封面";
+    ui.settingsCoverPreview.append(empty);
+  }
+  ui.removeSettingsCover.disabled = !previewUrl;
+}
+
+function openBookSettings(bookId) {
+  const index = state.books.findIndex((book) => book.id === bookId);
+  if (index < 0) return;
+  const book = state.books[index];
+  state.settings = { bookId, coverFile: null, previewUrl: null, removeCover: false };
+  ui.settingsName.value = book.customTitle || "";
+  ui.settingsName.placeholder = `默认：book${index + 1}`;
+  ui.settingsDefaultName.textContent = `book${index + 1}`;
+  renderBookSettingsCover();
+  ui.settings.hidden = false;
+  requestAnimationFrame(() => ui.settingsName.focus());
+}
+
+function closeBookSettings() {
+  if (ui.saveSettings.disabled || !state.settings) return;
+  if (state.settings.previewUrl) URL.revokeObjectURL(state.settings.previewUrl);
+  state.settings = null;
+  state.coverTarget = null;
+  ui.settings.hidden = true;
+}
+
+function chooseSettingsCover() {
+  if (!state.settings) return;
+  state.coverTarget = { type: "settings", bookId: state.settings.bookId };
+  ui.coverInput.click();
+}
+
+function setSettingsCover(file) {
+  if (!state.settings) return;
+  if (state.settings.previewUrl) URL.revokeObjectURL(state.settings.previewUrl);
+  state.settings.coverFile = file || null;
+  state.settings.previewUrl = file ? URL.createObjectURL(file) : null;
+  state.settings.removeCover = !file;
+  renderBookSettingsCover();
+}
+
+async function saveBookSettings(event) {
+  event.preventDefault();
+  if (!state.settings || ui.saveSettings.disabled) return;
+  ui.saveSettings.disabled = true;
+  ui.saveSettings.textContent = "正在保存…";
+  try {
+    let coverAction = { type: "unchanged" };
+    if (state.settings.coverFile) {
+      const cover = await optimizeCover(state.settings.coverFile);
+      coverAction = { type: "replace", cover };
+    } else if (state.settings.removeCover) {
+      coverAction = { type: "remove" };
+    }
+    const bookId = state.settings.bookId;
+    const position = state.books.findIndex((book) => book.id === bookId);
+    const customTitle = normalizeTitle(ui.settingsName.value);
+    await state.db.updateBookSettings(bookId, { customTitle, coverAction });
+    const savedName = customTitle || `book${position + 1}`;
+    if (state.settings.previewUrl) URL.revokeObjectURL(state.settings.previewUrl);
+    state.settings = null;
+    state.coverTarget = null;
+    ui.settings.hidden = true;
+    await refreshLibrary();
+    setStatus(`${savedName} 的设置已保存。`);
+  } catch (error) {
+    setStatus(error?.name === "QuotaExceededError" ? "本机存储空间不足，原来的书本设置未改变。" : (error.message || "书本设置保存失败，请重试。"));
+  } finally {
+    ui.saveSettings.disabled = false;
+    ui.saveSettings.textContent = "保存设置";
+  }
 }
 
 async function reorderBook(index, delta) {
@@ -543,7 +740,7 @@ function registerWebMCP() {
     inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, untrustedContentHint: true },
     execute: async () => {
       await refreshLibrary();
-      return { books: state.books.map((book, index) => ({ id: book.id, title: `book${index + 1}`, pages: book.pageCount })) };
+      return { books: state.books.map((book, index) => ({ id: book.id, title: displayTitle(book, index), pages: book.pageCount })) };
     },
   });
   register({
@@ -575,6 +772,16 @@ function bindEvents() {
     addGroupFromFiles(ui.fileInput.files);
     ui.fileInput.value = "";
   });
+  ui.coverInput.addEventListener("change", () => {
+    const file = ui.coverInput.files?.[0];
+    const target = state.coverTarget;
+    ui.coverInput.value = "";
+    state.coverTarget = null;
+    if (!file) return;
+    if (!isImageCandidate(file)) { setStatus("请选择可读取的封面图片。"); return; }
+    if (target?.type === "group") setGroupCover(target.groupId, file);
+    if (target?.type === "settings" && state.settings?.bookId === target.bookId) setSettingsCover(file);
+  });
   ui.generate.addEventListener("click", importGroups);
   ui.manage.addEventListener("click", () => { state.managing = !state.managing; renderLibrary(); });
   ui.clearAll.addEventListener("click", clearLibrary);
@@ -582,17 +789,29 @@ function bindEvents() {
   ui.next.addEventListener("click", () => turnPage(1));
   ui.closeReader.addEventListener("click", closeReader);
   ui.resetZoom.addEventListener("click", resetZoom);
+  ui.closeSettings.addEventListener("click", closeBookSettings);
+  ui.chooseSettingsCover.addEventListener("click", chooseSettingsCover);
+  ui.removeSettingsCover.addEventListener("click", () => setSettingsCover(null));
+  ui.settingsForm.addEventListener("submit", saveBookSettings);
   bindReaderGestures();
   window.addEventListener("keydown", (event) => {
-    if (!state.reader) return;
-    if (event.key === "ArrowLeft") { event.preventDefault(); turnPage(-1); }
-    if (event.key === "ArrowRight") { event.preventDefault(); turnPage(1); }
-    if (event.key === "Escape") { event.preventDefault(); closeReader(); }
+    if (state.reader) {
+      if (event.key === "ArrowLeft") { event.preventDefault(); turnPage(-1); }
+      if (event.key === "ArrowRight") { event.preventDefault(); turnPage(1); }
+      if (event.key === "Escape") { event.preventDefault(); closeReader(); }
+    } else if (event.key === "Escape" && state.settings) {
+      event.preventDefault(); closeBookSettings();
+    }
   });
   window.addEventListener("popstate", (event) => {
     const snapshot = event.state?.photoBook;
     if (snapshot && !state.reader) openBook(snapshot.bookId, snapshot.page, { fromHistory: true });
     else if (!snapshot && state.reader) teardownReader();
+  });
+  window.addEventListener("beforeunload", () => {
+    state.coverUrls.forEach((url) => URL.revokeObjectURL(url));
+    state.groups.forEach(disposeGroup);
+    if (state.settings?.previewUrl) URL.revokeObjectURL(state.settings.previewUrl);
   });
 }
 
